@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>SendPlatformEvent__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>When true, a platform event will be published when this rule is triggered</description>
+    <inlineHelpText>Enable this to publish a platform event when this rule is triggered</inlineHelpText>
+    <label>Send Platform Event</label>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>
