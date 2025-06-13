@@ -1,8 +1,10 @@
-public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Schedulable {
+public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Schedulable, Stateful {
 
 	private DateTime lastRunDate;
-	private Set<String> actionsToMonitor;
-	private List<AuditTrailWatcherRule__c> activeRules;
+	
+	// Get all active rules
+	Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>(); //action name / list of rules
+	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
 	private Map<String, List<Id>> groupNameToUserIds;
 	private EmailTemplate emailTemplate;
 	private String orgDomainUrl;
@@ -20,17 +22,30 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 
 		this.lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
 
-		this.activeRules = [
+		List<AuditTrailWatcherRule__c> activeRules = [
 			SELECT Id, Name, Action__c, GroupName__c, NotificationRecipient__c, SendPlatformEvent__c, Severity__c, Operator__c, Value__c
 			FROM AuditTrailWatcherRule__c
 			WHERE IsActive__c = true
 		];
 
-		// Get unique actions from active rules
-		this.actionsToMonitor = new Set<String>();
+		//exit if no active rules
+		if(activeRules.isEmpty()){
+			return;
+		}
+
+		ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>(this.activeRules);
+		
 		Set<String> allGroupNames = new Set<String>();
-		for(AuditTrailWatcherRule__c rule : this.activeRules) {
-			actionsToMonitor.add(rule.Action__c);
+		// Get unique actions from active rules and group names
+		for(AuditTrailWatcherRule__c rule : activeRules) {
+			//create actionToRules map
+			List<AuditTrailWatcherRule__c> rules = actionToRules.get(rule.Action__c);
+			if(rules == null) {
+				rules = new List<AuditTrailWatcherRule__c>();
+				actionToRules.put(rule.Action__c, rules);
+			}
+			rules.add(rule);
+
 			if(String.isNotBlank(rule.GroupName__c)) {
 				allGroupNames.addAll(rule.GroupName__c.split(','));
 			}
@@ -49,12 +64,16 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 					WHERE IsActive = true
 				)
 			]) {
-				if(!groupNameToUserIds.containsKey(member.Group.DeveloperName)) {
-					groupNameToUserIds.put(member.Group.DeveloperName, new List<Id>());
+				List<Id> userIds = groupNameToUserIds.get(member.Group.DeveloperName);
+				if(userIds == null) {
+					userIds = new List<Id>();
+					groupNameToUserIds.put(member.Group.DeveloperName, userIds);
 				}
-				groupNameToUserIds.get(member.Group.DeveloperName).add(member.UserOrGroupId);
+				userIds.add(member.UserOrGroupId);
 			}
 		}
+
+		//get the main url for email redirection
 		this.orgDomainUrl = URL.getOrgDomainURL().toExternalForm() + '/';
 
 		// Get email template ID
@@ -74,13 +93,13 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 			query += ' WHERE CreatedDate > :lastRunDate';
 		}
 
-		if(!actionsToMonitor.isEmpty()) {
-			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionsToMonitor';
+		if(!actionToRules.isEmpty()) {
+			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionToRules.keySet()';
 		}
 
 		// In test context, only process records created during the test
 		if(Test.isRunningTest()) {
-			query += (lastRunDate != null || !actionsToMonitor.isEmpty() ? ' AND' : ' WHERE') +
+			query += (lastRunDate != null || !actionToRules.isEmpty() ? ' AND' : ' WHERE') +
 					' CreatedDate >= :Test.startTest()';
 		}
 
@@ -88,29 +107,21 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 	}
 
 	public void execute(Database.BatchableContext bc, List<SetupAuditTrail> scope) {
-		// Get all active rules
-		Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>();
-		Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>(this.activeRules);
-
-		for(AuditTrailWatcherRule__c rule : this.activeRules) {
-			if(!actionToRules.containsKey(rule.Action__c)) {
-				actionToRules.put(rule.Action__c, new List<AuditTrailWatcherRule__c>());
-			}
-			actionToRules.get(rule.Action__c).add(rule);
-		}
-
 		// Group audit records by rule
 		Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
 
 		// Process each audit trail record
 		for(SetupAuditTrail audit : scope) {
-			if(actionToRules.containsKey(audit.Action)) {
-				for(AuditTrailWatcherRule__c rule : actionToRules.get(audit.Action)) {
+			List<AuditTrailWatcherRule__c> rules = actionToRules.get(audit.Action);
+			if(rules != null) {
+				for(AuditTrailWatcherRule__c rule : rules) {
 					// Group records by rule
-					if(!ruleToAuditRecords.containsKey(rule.Id)) {
-						ruleToAuditRecords.put(rule.Id, new List<SetupAuditTrail>());
+					List<SetupAuditTrail> auditRecords = ruleToAuditRecords.get(rule.Id);
+					if(auditRecords = null) {
+						auditRecords = new List<SetupAuditTrail>();
+						ruleToAuditRecords.put(rule.Id, auditRecords);
 					}
-					ruleToAuditRecords.get(rule.Id).add(audit);
+					auditRecords.add(audit);
 				}
 			}
 		}
@@ -163,7 +174,8 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		if(String.isNotBlank(rule.GroupName__c)) {
 			Set<String> groupNames = new Set<String>(rule.GroupName__c.split(','));
 			for(String groupName : groupNames) {
-				if(groupNameToUserIds.containsKey(groupName)) {
+				List<Id> userIds = groupNameToUserIds = groupNameToUserIds.get(groupName);
+				if(userIds != null) {
 					recipientIds.addAll(groupNameToUserIds.get(groupName));
 				}
 			}
