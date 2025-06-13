@@ -1,13 +1,12 @@
-public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Schedulable, Stateful {
+public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Database.Stateful, Schedulable {
 
-	private DateTime lastRunDate;
-	
-	// Get all active rules
+	DateTime lastRunDate;
+	Map<String, List<Id>> groupNameToUserIds;
+	EmailTemplate emailTemplate;
+	String orgDomainUrl;
 	Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>(); //action name / list of rules
 	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
-	private Map<String, List<Id>> groupNameToUserIds;
-	private EmailTemplate emailTemplate;
-	private String orgDomainUrl;
+	Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
 
 	public AuditTrailWatcherBatch() {
 		// Get the last successful run date
@@ -20,12 +19,12 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 			LIMIT 1
 		];
 
-		this.lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
+		lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
 
 		List<AuditTrailWatcherRule__c> activeRules = [
 			SELECT Id, Name, Action__c, GroupName__c, NotificationRecipient__c, SendPlatformEvent__c, Severity__c, Operator__c, Value__c
 			FROM AuditTrailWatcherRule__c
-			WHERE IsActive__c = true
+			WHERE IsActive__c = true ORDER BY Action__c
 		];
 
 		//exit if no active rules
@@ -33,8 +32,8 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 			return;
 		}
 
-		ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>(this.activeRules);
-		
+		ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>(activeRules);
+
 		Set<String> allGroupNames = new Set<String>();
 		// Get unique actions from active rules and group names
 		for(AuditTrailWatcherRule__c rule : activeRules) {
@@ -52,7 +51,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		}
 
 		// Get all group members at once
-		this.groupNameToUserIds = new Map<String, List<Id>>();
+		groupNameToUserIds = new Map<String, List<Id>>();
 		if(!allGroupNames.isEmpty()) {
 			for(GroupMember member : [
 				SELECT Group.DeveloperName, UserOrGroupId
@@ -74,41 +73,34 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		}
 
 		//get the main url for email redirection
-		this.orgDomainUrl = URL.getOrgDomainURL().toExternalForm() + '/';
+		orgDomainUrl = URL.getOrgDomainURL().toExternalForm() + '/';
 
 		// Get email template ID
 		List<EmailTemplate> templates = [
 			SELECT Id FROM EmailTemplate WHERE DeveloperName = 'AuditTrailWatcherNotification' LIMIT 1
 		];
 		if(!templates.isEmpty()) {
-			this.emailTemplate = templates[0];
+			emailTemplate = templates[0];
 		}
 	}
 
 	public Database.QueryLocator start(Database.BatchableContext bc) {
-		String query = 'SELECT Id, Action, Display, CreatedDate, CreatedById, CreatedBy.Username, Section, DelegateUser ' +
-					'FROM SetupAuditTrail';
+		String query = 'SELECT Id, Action, Display, CreatedDate, CreatedById, CreatedBy.Username, Section, DelegateUser' +
+					' FROM SetupAuditTrail';
 
 		if(lastRunDate != null) {
 			query += ' WHERE CreatedDate > :lastRunDate';
 		}
 
 		if(!actionToRules.isEmpty()) {
-			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionToRules.keySet()';
+			Set<String> actionRulesSet = actionToRules.keySet();
+			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionRulesSet';
 		}
-
-		// In test context, only process records created during the test
-		if(Test.isRunningTest()) {
-			query += (lastRunDate != null || !actionToRules.isEmpty() ? ' AND' : ' WHERE') +
-					' CreatedDate >= :Test.startTest()';
-		}
-
+		query += ' ORDER BY Action, CreatedDate';
 		return Database.getQueryLocator(query);
 	}
 
 	public void execute(Database.BatchableContext bc, List<SetupAuditTrail> scope) {
-		// Group audit records by rule
-		Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
 
 		// Process each audit trail record
 		for(SetupAuditTrail audit : scope) {
@@ -117,7 +109,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 				for(AuditTrailWatcherRule__c rule : rules) {
 					// Group records by rule
 					List<SetupAuditTrail> auditRecords = ruleToAuditRecords.get(rule.Id);
-					if(auditRecords = null) {
+					if(auditRecords == null) {
 						auditRecords = new List<SetupAuditTrail>();
 						ruleToAuditRecords.put(rule.Id, auditRecords);
 					}
@@ -125,11 +117,13 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 				}
 			}
 		}
+	}
 
-		// Prepare and send emails for each rule
+	public void finish(Database.BatchableContext bc) {
 		List<Messaging.SingleEmailMessage> emailsToSend = new List<Messaging.SingleEmailMessage>();
 		List<AuditTrailWatcherEvent__e> eventsToPublish = new List<AuditTrailWatcherEvent__e>();
 
+		// Prepare and send emails for each rule
 		for(Id ruleId : ruleToAuditRecords.keySet()) {
 			AuditTrailWatcherRule__c rule = ruleIdToRule.get(ruleId);
 
@@ -155,9 +149,6 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		}
 	}
 
-	public void finish(Database.BatchableContext bc) {
-	}
-
 	public void execute(SchedulableContext sc) {
 		Database.executeBatch(this);
 	}
@@ -174,7 +165,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		if(String.isNotBlank(rule.GroupName__c)) {
 			Set<String> groupNames = new Set<String>(rule.GroupName__c.split(','));
 			for(String groupName : groupNames) {
-				List<Id> userIds = groupNameToUserIds = groupNameToUserIds.get(groupName);
+				List<Id> userIds = groupNameToUserIds.get(groupName);
 				if(userIds != null) {
 					recipientIds.addAll(groupNameToUserIds.get(groupName));
 				}
@@ -195,10 +186,10 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Sche
 		for(SetupAuditTrail audit : auditRecords) {
 			tableContent += '<tr>';
 			// Action as a hyperlink to the rule record
-			tableContent += '<td><a href=' + this.orgDomainUrl + rule.Id + ' style="color:#0070d2;text-decoration:underline;">' + audit.Action + '</a></td>';
+			tableContent += '<td><a href=' + orgDomainUrl + rule.Id + ' style="color:#0070d2;text-decoration:underline;">' + audit.Action + '</a></td>';
 			tableContent += '<td>' + audit.Display + '</td>';
 			tableContent += '<td>' + audit.Section + '</td>';
-			tableContent += '<td>' + audit.CreatedDate + '</td>';
+			tableContent += '<td>' + audit.CreatedDate.format() + '</td>';
 			tableContent += '<td>' + audit.CreatedBy.Username + '</td>';
 			tableContent += '<td>' + (audit.DelegateUser != null ? audit.DelegateUser : '') + '</td>';
 			tableContent += '</tr>';
