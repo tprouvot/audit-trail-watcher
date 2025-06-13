@@ -55,9 +55,18 @@ Audit Trail Watcher is not an official Salesforce product, and has not been offi
 
 ## How to Run
 
+- **Initial Setup:**
+  - Before scheduling the batch, it's recommended to run it manually with a specific lookback period to process historical data:
+    ```apex
+    // Look back 7 days
+    Database.executeBatch(new AuditTrailWatcherBatch(7));
+    ```
+  - This helps ensure you don't miss any important audit trail events from the past and allows you to verify your rules are working as expected.
+
 - **Manual Run:**
   - Execute the batch class in Apex:
     ```apex
+    // Process only new records since last run
     Database.executeBatch(new AuditTrailWatcherBatch());
     ```
 - **Scheduled Run:**

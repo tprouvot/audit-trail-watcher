@@ -4,9 +4,14 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	Map<String, List<Id>> groupNameToUserIds;
 	EmailTemplate emailTemplate;
 	String orgDomainUrl;
-	Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>(); //action name / list of rules
+	Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>();
 	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
 	Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
+
+	public AuditTrailWatcherBatch(Integer daysToLookBack) {
+		this.lastRunDate = DateTime.now().addDays(-daysToLookBack);
+		initialize();
+	}
 
 	public AuditTrailWatcherBatch() {
 		// Get the last successful run date
@@ -19,8 +24,11 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 			LIMIT 1
 		];
 
-		lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
+		this.lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
+		initialize();
+	}
 
+	private void initialize() {
 		List<AuditTrailWatcherRule__c> activeRules = [
 			SELECT Id, Name, Action__c, GroupName__c, NotificationRecipient__c, SendPlatformEvent__c, Severity__c, Operator__c, Value__c
 			FROM AuditTrailWatcherRule__c
