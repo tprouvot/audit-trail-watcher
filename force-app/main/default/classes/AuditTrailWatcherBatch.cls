@@ -9,7 +9,10 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	DateTime lastRunDate;
 	Map<String, List<Id>> groupNameToUserIds;
 	EmailTemplate emailTemplate;
+	Id orgWideEmailAddressId;
 	String orgDomainUrl;
+
+	private static final String ORG_WIDE_EMAIL_DISPLAY_NAME = 'AuditTrailWatcher';
 	Map<String, Set<Id>> actionToRuleIds = new Map<String, Set<Id>>();
 	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
 	Map<Id, List<AuditTrailWatcherRuleCondition__c>> ruleToConditions = new Map<Id, List<AuditTrailWatcherRuleCondition__c>>();
@@ -108,6 +111,13 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		];
 		if (!templates.isEmpty()) {
 			emailTemplate = templates[0];
+		}
+
+		List<OrgWideEmailAddress> owaList = [
+			SELECT Id FROM OrgWideEmailAddress WHERE DisplayName = :ORG_WIDE_EMAIL_DISPLAY_NAME LIMIT 1
+		];
+		if (!owaList.isEmpty()) {
+			orgWideEmailAddressId = owaList[0].Id;
 		}
 	}
 
@@ -431,7 +441,9 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 			);
 			mail.setHtmlBody(mail.getHtmlBody().replace('{TableContent}', tableContent));
 			mail.setSaveAsActivity(false);
-			mail.setOrgWideEmailAddressId('0D2J7000000wk58KAA');//TODO use setting or whatever to customize this
+			if (orgWideEmailAddressId != null) {
+				mail.setOrgWideEmailAddressId(orgWideEmailAddressId);
+			}
 			emails.add(mail);
 		}
 

@@ -6,6 +6,12 @@ This framework allows Salesforce admins to configure rules to monitor Setup Audi
 
 Audit Trail Watcher is not an official Salesforce product, and has not been officially tested or documented by Salesforce.
 
+## Prerequisites
+
+Before deploying or using this framework:
+
+1. **Org-Wide Email Address** – Create an Org-Wide Email Address in **Setup → Organization-Wide Addresses** with **Display Name** set to `AuditTrailWatcher`. This address is used as the "From" address for notification emails. If not created, emails will use the running user's address.
+
 ## Architecture
 
 Rules are defined on the parent object `AuditTrailWatcherRule__c`. The **Action** field on the parent specifies which Setup Audit Trail action to monitor. Each rule can have multiple **conditions** stored as child records on `AuditTrailWatcherRuleCondition__c`; conditions define additional criteria (Source Field, Operator, Value). The parent defines how to combine them (AND, OR, or Custom formula) and where to send notifications.
