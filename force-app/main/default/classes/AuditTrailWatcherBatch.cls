@@ -1,3 +1,9 @@
+/**
+ * Batch and schedulable job that monitors Setup Audit Trail and triggers rules.
+ * @author tprouvot
+ * @license MIT
+ * @see https://github.com/tprouvot/audit-trail-watcher
+ */
 public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Database.Stateful, Schedulable {
 
 	DateTime lastRunDate;

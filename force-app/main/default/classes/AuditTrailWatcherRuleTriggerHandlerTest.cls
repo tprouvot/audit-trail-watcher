@@ -1,3 +1,9 @@
+/**
+ * Test class for AuditTrailWatcherRuleTriggerHandler.
+ * @author tprouvot
+ * @license MIT
+ * @see https://github.com/tprouvot/audit-trail-watcher
+ */
 @isTest
 private class AuditTrailWatcherRuleTriggerHandlerTest {
 

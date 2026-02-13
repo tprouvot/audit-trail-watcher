@@ -125,10 +125,6 @@ The included email template shows a table of matching audit records. The Action 
 
 `AuditTrailWatcherEvent__e` is published when a rule matches and **Send Platform Event** is enabled. It includes action, section, user, and other details.
 
-## Migration
-
-If upgrading from the legacy single-condition model, run `scripts/migrate-rules-to-conditions.apex` before deploying the removal of the old Action/Operator/Value fields. See `scripts/README.md`.
-
 ## Deploy
 
 ```sh

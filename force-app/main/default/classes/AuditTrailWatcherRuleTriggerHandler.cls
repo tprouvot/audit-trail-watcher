@@ -1,6 +1,9 @@
 /**
  * Handler for AuditTrailWatcherRule__c triggers.
  * Validates custom logic formula syntax when LogicType is Custom.
+ * @author tprouvot
+ * @license MIT
+ * @see https://github.com/tprouvot/audit-trail-watcher
  */
 public with sharing class AuditTrailWatcherRuleTriggerHandler {
 

@@ -2,6 +2,9 @@
  * Selector for SetupAuditTrail records.
  * This class exists to allow mocking of read-only SetupAuditTrail objects in unit tests,
  * since SetupAuditTrail cannot be created via DML and test orgs may not have predictable audit data.
+ * @author tprouvot
+ * @license MIT
+ * @see https://github.com/tprouvot/audit-trail-watcher
  */
 public virtual class AuditTrailSelector {
 
