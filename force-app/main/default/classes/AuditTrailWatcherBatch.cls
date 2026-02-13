@@ -12,8 +12,12 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	@TestVisible
 	Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
 
+	@TestVisible
+	private AuditTrailSelector auditSelector;
+
 	public AuditTrailWatcherBatch(Integer daysToLookBack) {
 		this.lastRunDate = DateTime.now().addDays(-daysToLookBack);
+		this.auditSelector = new AuditTrailSelector();
 		initialize();
 	}
 
@@ -28,6 +32,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		];
 
 		this.lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
+		this.auditSelector = new AuditTrailSelector();
 		initialize();
 	}
 
@@ -100,24 +105,12 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		}
 	}
 
-	public Database.QueryLocator start(Database.BatchableContext bc) {
-		Set<String> selectFields = new Set<String>{
-			'Id', 'Action', 'Display', 'CreatedDate', 'CreatedById', 'CreatedBy.Username', 'Section', 'DelegateUser'
-		};
-		selectFields.addAll(auditFieldsToQuery);
-		String query = 'SELECT ' + String.join(new List<String>(selectFields), ', ') +
-			' FROM SetupAuditTrail';
-
-		if (lastRunDate != null) {
-			query += ' WHERE CreatedDate > :lastRunDate';
+	public Iterable<SetupAuditTrail> start(Database.BatchableContext bc) {
+		if (ruleIdToRule.isEmpty()) {
+			return new List<SetupAuditTrail>();
 		}
-
-		if (!actionToRuleIds.isEmpty()) {
-			Set<String> actionSet = actionToRuleIds.keySet();
-			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionSet';
-		}
-		query += ' ORDER BY Action, CreatedDate';
-		return Database.getQueryLocator(query);
+		Set<String> actions = actionToRuleIds.keySet();
+		return auditSelector.getAuditTrailIterable(lastRunDate, actions, auditFieldsToQuery);
 	}
 
 	public void execute(Database.BatchableContext bc, List<SetupAuditTrail> scope) {
