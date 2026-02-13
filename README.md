@@ -2,7 +2,8 @@
 
 This framework allows Salesforce admins to configure rules to monitor Setup Audit Trail events and notify users or systems based on customizable conditions.
 
-<img width="1417" height="823" alt="Audit Trail Watcher" src="https://github.com/user-attachments/assets/653a8e44-0dfa-4f5e-8017-afae975ddcfb" />
+<img width="1417" height="855" alt="Audit Trail Watcher" src="https://github.com/user-attachments/assets/05eae8a6-9d75-4513-8453-3aec8af451d7" />
+
 
 
 # Disclaimer
