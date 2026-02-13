@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>RequireCustomLogicForCustomType</fullName>
+    <active>true</active>
+    <description>When Logic Type is Custom, Custom Logic must be specified.</description>
+    <errorConditionFormula>AND(
+    ISPICKVAL(LogicType__c, &quot;Custom&quot;),
+    ISBLANK(CustomLogic__c)
+)</errorConditionFormula>
+    <errorDisplayField>CustomLogic__c</errorDisplayField>
+    <errorMessage>Custom Logic is required when Logic Type is Custom.</errorMessage>
+</ValidationRule>

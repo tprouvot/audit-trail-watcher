@@ -1,85 +1,62 @@
 @isTest
 private class AuditTrailWatcherBatchTest {
 
-	@TestSetup
+	@testSetup
 	static void setup() {
-		// Create test users
-		Profile p = [SELECT Id FROM Profile WHERE Name = 'Standard User'];
-		String uniqueId = String.valueOf(Crypto.getRandomLong());
-
-		User testUser1 = new User(
-			Alias = 'tuser1',
-			Email = 'testuser1@example.com',
-			EmailEncodingKey = 'UTF-8',
-			LastName = 'Testing',
-			LanguageLocaleKey = 'en_US',
-			LocaleSidKey = 'en_US',
-			ProfileId = p.Id,
-			TimeZoneSidKey = 'America/Los_Angeles',
-			UserName = 'testuser1_' + uniqueId + '@example.com.test'
+		AuditTrailWatcherRule__c rule = new AuditTrailWatcherRule__c(
+			Name = 'PermSetAssign Rule',
+			Action__c = 'PermSetAssign',
+			LogicType__c = 'AND',
+			NotificationRecipient__c = UserInfo.getUserId(),
+			SendPlatformEvent__c = true,
+			Severity__c = 'Critical',
+			IsActive__c = true,
+			TrackActivity__c = true
 		);
-		insert testUser1;
+		insert rule;
 
-		EmailTemplate template = new EmailTemplate(
-				Name = 'AuditTrailWatcherNotification',
-				DeveloperName = 'AuditTrailWatcherNotification',
-				FolderId = UserInfo.getUserId(),
-				IsActive = true,
-				Subject = 'Audit Trail Alert: {!AuditTrailWatcherRule__c.Name}',
-				Body = 'Test email body',
-				HtmlValue = '<p>Test email body</p><p>{TableContent}</p>',
-				TemplateType = 'custom'
-			);
-			insert template;
-
-		PermissionSet ps = [SELECT Id FROM PermissionSet WHERE Name = 'AuditTrailWatcherAdmin'];
-		insert new PermissionSetAssignment(AssigneeId = testUser1.Id, PermissionSetId = ps.Id);
-
-		System.runas(testUser1) {
-			List<AuditTrailWatcherRule__c> rules = new List<AuditTrailWatcherRule__c>{
-				new AuditTrailWatcherRule__c(
-				Name = 'Test Rule 1',
-				Action__c = 'deactivateduser',
-				NotificationRecipient__c = testUser1.Id,
-				IsActive__c = true,
-				SendPlatformEvent__c = true,
-				Severity__c = 'Critical'
-			),
-			new AuditTrailWatcherRule__c(
-				Name = 'Test Rule 2',
-				Action__c = 'PermSetGroupAssign',
-				NotificationRecipient__c = testUser1.Id,
-				IsActive__c = true,
-				SendPlatformEvent__c = false,
-				Severity__c = 'Warning'
-			)};
-			insert rules;
-		}
+		insert new AuditTrailWatcherRuleCondition__c(
+			AuditTrailWatcherRule__c = rule.Id,
+			ConditionNumber__c = 1,
+			SourceField__c = 'Display',
+			Operator__c = 'Contains',
+			Value__c = 'Permission set'
+		);
 	}
 
 	@isTest
-	static void testBatchScenarios() {
-		// Get test user
-		User testUser = [SELECT Id FROM User WHERE Alias = 'tuser1' LIMIT 1];
+	static void testBatchExecution() {
+		Id ruleId = [SELECT Id FROM AuditTrailWatcherRule__c WHERE Name = 'PermSetAssign Rule' LIMIT 1].Id;
+		AuditTrailWatcherBatch batch = new AuditTrailWatcherBatch(1);
 
 		Test.startTest();
-
-		// Scenario 1: Test with active rules and create audit trail
-		System.runAs(new User(Id = UserInfo.getUserId())) {
-			testUser.IsActive = false;
-			update testUser;
-		}
-
-		// Verify that a SetupAuditTrail record was created
-		List<SetupAuditTrail> auditTrails = [ SELECT Id, Action FROM SetupAuditTrail];
-		System.assert(!auditTrails.isEmpty(), 'Should have created a SetupAuditTrail record');
-
-
-		Database.executeBatch(new AuditTrailWatcherBatch());
+		Database.executeBatch(batch);
 		Test.stopTest();
 
-		// Verify emails were sent
-		Integer emailInvocations = Limits.getEmailInvocations();
-		System.assert(emailInvocations > 0, 'Should have sent emails');
+		List<Event> activityEvents = [SELECT Id FROM Event WHERE WhatId = :ruleId AND Subject LIKE 'Audit Trail Alert:%'];
+		System.assert(!activityEvents.isEmpty(), 'Activity event should have been created by TrackActivity.');
+	}
+
+	@isTest
+	static void testSchedulableExecution() {
+		String jobId = System.schedule('Test AuditTrailWatcherBatch', '0 0 0 * * ?', new AuditTrailWatcherBatch());
+
+		CronTrigger ct = [SELECT Id, CronExpression, TimesTriggered, NextFireTime FROM CronTrigger WHERE Id = :jobId];
+		System.assertEquals('0 0 0 * * ?', ct.CronExpression, 'Cron expression should match.');
+	}
+
+	@isTest
+	static void testCustomLogicEvaluator() {
+		Map<Decimal, Boolean> results = new Map<Decimal, Boolean>();
+		results.put(1, true);
+		results.put(2, false);
+		results.put(3, true);
+
+		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('1', results));
+		System.assertEquals(false, AuditTrailWatcherBatch.evaluateCustomLogic('2', results));
+		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('1 AND 3', results));
+		System.assertEquals(false, AuditTrailWatcherBatch.evaluateCustomLogic('1 AND 2', results));
+		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('1 OR 2', results));
+		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('(1 OR 2) AND 3', results));
 	}
 }

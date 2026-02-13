@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Severity__c</fullName>
-    <defaultValue>&quot;Warning&quot;</defaultValue>
-    <description>Defines the type of the alert, used in the email template.</description>
-    <label>Severity</label>
-    <required>false</required>
+    <fullName>LogicType__c</fullName>
+    <description>How to combine condition results: AND (all must match), OR (any must match), or Custom (use formula in Custom Logic field).</description>
+    <label>Logic Type</label>
+    <required>true</required>
     <trackHistory>true</trackHistory>
     <trackTrending>false</trackTrending>
     <type>Picklist</type>
@@ -13,19 +12,19 @@
         <valueSetDefinition>
             <sorted>false</sorted>
             <value>
-                <fullName>Info</fullName>
+                <fullName>AND</fullName>
                 <default>true</default>
-                <label>Info</label>
+                <label>AND</label>
             </value>
             <value>
-                <fullName>Warning</fullName>
+                <fullName>OR</fullName>
                 <default>false</default>
-                <label>Warning</label>
+                <label>OR</label>
             </value>
             <value>
-                <fullName>Critical</fullName>
+                <fullName>Custom</fullName>
                 <default>false</default>
-                <label>Critical</label>
+                <label>Custom</label>
             </value>
         </valueSetDefinition>
     </valueSet>

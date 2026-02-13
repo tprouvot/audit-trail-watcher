@@ -128,14 +128,11 @@
     </actionOverrides>
     <actionOverrides>
         <actionName>View</actionName>
-        <comment>Action override created by Lightning App Builder during activation.</comment>
-        <content>Audit_Trail_Watcher_Rule_Record_Page</content>
-        <formFactor>Large</formFactor>
-        <skipRecordTypeSelect>false</skipRecordTypeSelect>
-        <type>Flexipage</type>
+        <type>Default</type>
     </actionOverrides>
     <actionOverrides>
         <actionName>View</actionName>
+        <formFactor>Large</formFactor>
         <type>Default</type>
     </actionOverrides>
     <actionOverrides>
@@ -146,26 +143,25 @@
     <allowInChatterGroups>false</allowInChatterGroups>
     <compactLayoutAssignment>SYSTEM</compactLayoutAssignment>
     <deploymentStatus>Deployed</deploymentStatus>
-    <description>Rules for monitoring specific actions in the Setup Audit Trail</description>
-    <enableActivities>true</enableActivities>
+    <description>Conditions for Audit Trail Watcher rules. Each condition defines Action, Operator, and Value to evaluate against Setup Audit Trail records.</description>
+    <enableActivities>false</enableActivities>
     <enableBulkApi>true</enableBulkApi>
     <enableFeeds>false</enableFeeds>
-    <enableHistory>true</enableHistory>
+    <enableHistory>false</enableHistory>
     <enableLicensing>false</enableLicensing>
     <enableReports>false</enableReports>
     <enableSearch>false</enableSearch>
     <enableSharing>true</enableSharing>
     <enableStreamingApi>true</enableStreamingApi>
-    <externalSharingModel>Private</externalSharingModel>
-    <label>Audit Trail Watcher Rule</label>
+    <externalSharingModel>ControlledByParent</externalSharingModel>
+    <label>Audit Trail Watcher Rule Condition</label>
     <nameField>
-        <label>Rule Name</label>
-        <trackHistory>true</trackHistory>
-        <type>Text</type>
+        <displayFormat>CON-{0000}</displayFormat>
+        <label>Condition Name</label>
+        <type>AutoNumber</type>
     </nameField>
-    <pluralLabel>Audit Trail Watcher Rules</pluralLabel>
+    <pluralLabel>Audit Trail Watcher Rule Conditions</pluralLabel>
     <searchLayouts></searchLayouts>
-    <sharingModel>ReadWrite</sharingModel>
-    <startsWith>Vowel</startsWith>
+    <sharingModel>ControlledByParent</sharingModel>
     <visibility>Public</visibility>
 </CustomObject>

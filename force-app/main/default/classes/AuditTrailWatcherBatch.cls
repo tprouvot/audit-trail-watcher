@@ -4,8 +4,12 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	Map<String, List<Id>> groupNameToUserIds;
 	EmailTemplate emailTemplate;
 	String orgDomainUrl;
-	Map<String, List<AuditTrailWatcherRule__c>> actionToRules = new Map<String, List<AuditTrailWatcherRule__c>>();
+	Map<String, Set<Id>> actionToRuleIds = new Map<String, Set<Id>>();
 	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
+	Map<Id, List<AuditTrailWatcherRuleCondition__c>> ruleToConditions = new Map<Id, List<AuditTrailWatcherRuleCondition__c>>();
+	Set<String> auditFieldsToQuery = new Set<String>();
+
+	@TestVisible
 	Map<Id, List<SetupAuditTrail>> ruleToAuditRecords = new Map<Id, List<SetupAuditTrail>>();
 
 	public AuditTrailWatcherBatch(Integer daysToLookBack) {
@@ -14,7 +18,6 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	}
 
 	public AuditTrailWatcherBatch() {
-		// Get the last successful run date
 		List<AsyncApexJob> lastJob = [
 			SELECT CompletedDate
 			FROM AsyncApexJob
@@ -30,49 +33,56 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 
 	private void initialize() {
 		List<AuditTrailWatcherRule__c> activeRules = [
-			SELECT Id, Name, Action__c, GroupName__c, NotificationRecipient__c, SendPlatformEvent__c, Severity__c, Operator__c, Value__c
+			SELECT Id, Name, OwnerId, Action__c, GroupName__c, NotificationRecipient__c, SendPlatformEvent__c, Severity__c, LogicType__c, CustomLogic__c, TrackActivity__c,
+				(SELECT ConditionNumber__c, Operator__c, Value__c, SourceField__c FROM AuditTrailWatcherRuleConditions__r ORDER BY ConditionNumber__c)
 			FROM AuditTrailWatcherRule__c
-			WHERE IsActive__c = true ORDER BY Action__c
+			WHERE IsActive__c = true AND Action__c != null
 		];
 
-		//exit if no active rules
-		if(activeRules.isEmpty()){
+		if (activeRules.isEmpty()) {
 			return;
 		}
 
 		ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>(activeRules);
-
 		Set<String> allGroupNames = new Set<String>();
-		// Get unique actions from active rules and group names
-		for(AuditTrailWatcherRule__c rule : activeRules) {
-			//create actionToRules map
-			List<AuditTrailWatcherRule__c> rules = actionToRules.get(rule.Action__c);
-			if(rules == null) {
-				rules = new List<AuditTrailWatcherRule__c>();
-				actionToRules.put(rule.Action__c, rules);
-			}
-			rules.add(rule);
 
-			if(String.isNotBlank(rule.GroupName__c)) {
+		for (AuditTrailWatcherRule__c rule : activeRules) {
+			List<AuditTrailWatcherRuleCondition__c> conditions = rule.AuditTrailWatcherRuleConditions__r;
+			if (conditions != null && !conditions.isEmpty()) {
+				ruleToConditions.put(rule.Id, conditions);
+				for (AuditTrailWatcherRuleCondition__c c : conditions) {
+					if (String.isNotBlank(c.SourceField__c)) {
+						String f = c.SourceField__c.trim();
+						if (Pattern.matches('^[a-zA-Z0-9_.]+$', f)) {
+							auditFieldsToQuery.add(f);
+						}
+					}
+				}
+			}
+
+			String actionKey = rule.Action__c != null ? rule.Action__c.toLowerCase() : null;
+			Set<Id> ruleIds = actionToRuleIds.get(actionKey);
+			if (ruleIds == null) {
+				ruleIds = new Set<Id>();
+				actionToRuleIds.put(actionKey, ruleIds);
+			}
+			ruleIds.add(rule.Id);
+
+			if (String.isNotBlank(rule.GroupName__c)) {
 				allGroupNames.addAll(rule.GroupName__c.split(','));
 			}
 		}
 
-		// Get all group members at once
 		groupNameToUserIds = new Map<String, List<Id>>();
-		if(!allGroupNames.isEmpty()) {
-			for(GroupMember member : [
+		if (!allGroupNames.isEmpty()) {
+			for (GroupMember member : [
 				SELECT Group.DeveloperName, UserOrGroupId
 				FROM GroupMember
 				WHERE Group.DeveloperName IN :allGroupNames
-				AND UserOrGroupId IN (
-					SELECT Id
-					FROM User
-					WHERE IsActive = true
-				)
+				AND UserOrGroupId IN (SELECT Id FROM User WHERE IsActive = true)
 			]) {
 				List<Id> userIds = groupNameToUserIds.get(member.Group.DeveloperName);
-				if(userIds == null) {
+				if (userIds == null) {
 					userIds = new List<Id>();
 					groupNameToUserIds.put(member.Group.DeveloperName, userIds);
 				}
@@ -80,46 +90,69 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 			}
 		}
 
-		//get the main url for email redirection
 		orgDomainUrl = URL.getOrgDomainURL().toExternalForm() + '/';
 
-		// Get email template ID
 		List<EmailTemplate> templates = [
 			SELECT Id FROM EmailTemplate WHERE DeveloperName = 'AuditTrailWatcherNotification' LIMIT 1
 		];
-		if(!templates.isEmpty()) {
+		if (!templates.isEmpty()) {
 			emailTemplate = templates[0];
 		}
 	}
 
 	public Database.QueryLocator start(Database.BatchableContext bc) {
-		String query = 'SELECT Id, Action, Display, CreatedDate, CreatedById, CreatedBy.Username, Section, DelegateUser' +
-					' FROM SetupAuditTrail';
+		Set<String> selectFields = new Set<String>{
+			'Id', 'Action', 'Display', 'CreatedDate', 'CreatedById', 'CreatedBy.Username', 'Section', 'DelegateUser'
+		};
+		selectFields.addAll(auditFieldsToQuery);
+		String query = 'SELECT ' + String.join(new List<String>(selectFields), ', ') +
+			' FROM SetupAuditTrail';
 
-		if(lastRunDate != null) {
+		if (lastRunDate != null) {
 			query += ' WHERE CreatedDate > :lastRunDate';
 		}
 
-		if(!actionToRules.isEmpty()) {
-			Set<String> actionRulesSet = actionToRules.keySet();
-			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionRulesSet';
+		if (!actionToRuleIds.isEmpty()) {
+			Set<String> actionSet = actionToRuleIds.keySet();
+			query += (lastRunDate != null ? ' AND' : ' WHERE') + ' Action IN :actionSet';
 		}
 		query += ' ORDER BY Action, CreatedDate';
 		return Database.getQueryLocator(query);
 	}
 
 	public void execute(Database.BatchableContext bc, List<SetupAuditTrail> scope) {
+		for (SetupAuditTrail audit : scope) {
+			String actionKey = audit.Action != null ? audit.Action.toLowerCase() : null;
+			Set<Id> ruleIds = actionToRuleIds.get(actionKey);
+			if (ruleIds == null) {
+				continue;
+			}
 
-		// Process each audit trail record
-		for(SetupAuditTrail audit : scope) {
-			List<AuditTrailWatcherRule__c> rules = actionToRules.get(audit.Action);
-			if(rules != null) {
-				for(AuditTrailWatcherRule__c rule : rules) {
-					// Group records by rule
-					List<SetupAuditTrail> auditRecords = ruleToAuditRecords.get(rule.Id);
-					if(auditRecords == null) {
+			for (Id ruleId : ruleIds) {
+				AuditTrailWatcherRule__c rule = ruleIdToRule.get(ruleId);
+				List<AuditTrailWatcherRuleCondition__c> conditions = ruleToConditions.get(ruleId);
+				if (rule == null) {
+					continue;
+				}
+
+				Boolean matches;
+				if (conditions == null || conditions.isEmpty()) {
+					matches = true;
+				} else {
+					Map<Decimal, Boolean> conditionResults = new Map<Decimal, Boolean>();
+					for (AuditTrailWatcherRuleCondition__c cond : conditions) {
+						String fieldValue = getAuditFieldValue(audit, cond.SourceField__c);
+						Boolean condMatches = evaluateCondition(cond.Operator__c, cond.Value__c, fieldValue);
+						conditionResults.put(cond.ConditionNumber__c, condMatches);
+					}
+					matches = evaluateRuleLogic(rule, conditionResults);
+				}
+
+				if (matches) {
+					List<SetupAuditTrail> auditRecords = ruleToAuditRecords.get(ruleId);
+					if (auditRecords == null) {
 						auditRecords = new List<SetupAuditTrail>();
-						ruleToAuditRecords.put(rule.Id, auditRecords);
+						ruleToAuditRecords.put(ruleId, auditRecords);
 					}
 					auditRecords.add(audit);
 				}
@@ -127,33 +160,51 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		}
 	}
 
+	private String getAuditFieldValue(SetupAuditTrail audit, String sourceField) {
+		if (String.isBlank(sourceField)) {
+			sourceField = 'Display';
+		}
+		try {
+			Object val = audit.get(sourceField.trim());
+			return val != null ? String.valueOf(val) : '';
+		} catch (Exception e) {
+			return '';
+		}
+	}
+
 	public void finish(Database.BatchableContext bc) {
 		List<Messaging.SingleEmailMessage> emailsToSend = new List<Messaging.SingleEmailMessage>();
 		List<AuditTrailWatcherEvent__e> eventsToPublish = new List<AuditTrailWatcherEvent__e>();
+		List<Event> eventsToInsert = new List<Event>();
 
-		// Prepare and send emails for each rule
-		for(Id ruleId : ruleToAuditRecords.keySet()) {
+		for (Id ruleId : ruleToAuditRecords.keySet()) {
 			AuditTrailWatcherRule__c rule = ruleIdToRule.get(ruleId);
 
-			if(rule != null) {
-				// Prepare emails if needed
-				if(String.isNotBlank(rule.GroupName__c) || rule.NotificationRecipient__c != null) {
+			if (rule != null) {
+				if (String.isNotBlank(rule.GroupName__c) || rule.NotificationRecipient__c != null) {
 					emailsToSend.addAll(prepareEmail(rule, ruleToAuditRecords.get(ruleId)));
 				}
 
-				// Prepare platform events if needed
-				if(rule.SendPlatformEvent__c) {
+				if (rule.SendPlatformEvent__c) {
 					eventsToPublish.add(preparePlatformEvent(rule, ruleToAuditRecords.get(ruleId)));
+				}
+
+				if (rule.TrackActivity__c && (String.isNotBlank(rule.GroupName__c) || rule.NotificationRecipient__c != null)) {
+					eventsToInsert.add(createActivityEvent(rule, ruleToAuditRecords.get(ruleId)));
 				}
 			}
 		}
 
-		if(!emailsToSend.isEmpty()) {
+		if (!emailsToSend.isEmpty()) {
 			Messaging.sendEmail(emailsToSend);
 		}
 
-		if(!eventsToPublish.isEmpty()) {
+		if (!eventsToPublish.isEmpty()) {
 			EventBus.publish(eventsToPublish);
+		}
+
+		if (!eventsToInsert.isEmpty()) {
+			insert eventsToInsert;
 		}
 	}
 
@@ -161,107 +212,147 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		Database.executeBatch(this);
 	}
 
-	private List<Messaging.SingleEmailMessage> prepareEmail(AuditTrailWatcherRule__c rule, List<SetupAuditTrail> auditRecords) {
-		Set<Id> recipientIds = new Set<Id>();
-
-		// Add direct recipient if specified
-		if(rule.NotificationRecipient__c != null) {
-			recipientIds.add(rule.NotificationRecipient__c);
-		}
-
-		// Add group members if specified
-		if(String.isNotBlank(rule.GroupName__c)) {
-			Set<String> groupNames = new Set<String>(rule.GroupName__c.split(','));
-			for(String groupName : groupNames) {
-				List<Id> userIds = groupNameToUserIds.get(groupName);
-				if(userIds != null) {
-					recipientIds.addAll(groupNameToUserIds.get(groupName));
+	private Boolean evaluateRuleLogic(AuditTrailWatcherRule__c rule, Map<Decimal, Boolean> conditionResults) {
+		if (rule.LogicType__c == 'AND') {
+			for (Boolean r : conditionResults.values()) {
+				if (!r) {
+					return false;
 				}
 			}
+			return true;
 		}
 
-		// Build table content with scrollable wrapper and Action as a link
-		String tableContent = '<table style="min-width:700px;"><thead><tr>';
-		tableContent += '<th>Action</th>';
-		tableContent += '<th>Display</th>';
-		tableContent += '<th>Section</th>';
-		tableContent += '<th>Created Date</th>';
-		tableContent += '<th>Created By</th>';
-		tableContent += '<th>Delegate User</th>';
-		tableContent += '</tr></thead>';
-		tableContent += '<tbody>';
-
-		for(SetupAuditTrail audit : auditRecords) {
-			tableContent += '<tr>';
-			// Action as a hyperlink to the rule record
-			tableContent += '<td><a href=' + orgDomainUrl + rule.Id + ' style="color:#0070d2;text-decoration:underline;">' + audit.Action + '</a></td>';
-			tableContent += '<td>' + audit.Display + '</td>';
-			tableContent += '<td>' + audit.Section + '</td>';
-			tableContent += '<td>' + audit.CreatedDate.format() + '</td>';
-			tableContent += '<td>' + audit.CreatedBy.Username + '</td>';
-			tableContent += '<td>' + (audit.DelegateUser != null ? audit.DelegateUser : '') + '</td>';
-			tableContent += '</tr>';
-		}
-		tableContent += '</tbody></table>';
-
-		// Create email messages for each recipient
-		List<Messaging.SingleEmailMessage> emails = new List<Messaging.SingleEmailMessage>();
-		for(Id recipientId : recipientIds) {
-			// Render the template with the rule as the whatId
-			Messaging.SingleEmailMessage mail = Messaging.renderStoredEmailTemplate(
-				emailTemplate.Id,
-				recipientId, // whoId
-				rule.Id // whatId
-			);
-			// Replace the table content placeholder with actual content
-			mail.setHtmlBody(mail.getHtmlBody().replace('{TableContent}', tableContent));
-			mail.setSaveAsActivity(false);
-			emails.add(mail);
-		}
-
-		return emails;
-	}
-
-	private String buildDetailText(List<SetupAuditTrail> auditRecords) {
-		String detail = '';
-		for(SetupAuditTrail audit : auditRecords) {
-			detail += 'Created By: ' + audit.CreatedBy.Username + ' (' + audit.CreatedById + ')\n';
-			detail += 'Display: ' + audit.Display + '\n';
-			detail += 'Section: ' + audit.Section + '\n';
-			if(audit.DelegateUser != null) {
-				detail += 'Delegate User: ' + audit.DelegateUser + '\n';
+		if (rule.LogicType__c == 'OR') {
+			for (Boolean r : conditionResults.values()) {
+				if (r) {
+					return true;
+				}
 			}
-			detail += 'Created Date: ' + audit.CreatedDate + '\n\n';
+			return false;
 		}
-		return detail;
+
+		if (rule.LogicType__c == 'Custom' && String.isNotBlank(rule.CustomLogic__c)) {
+			return evaluateCustomLogic(rule.CustomLogic__c.trim(), conditionResults);
+		}
+
+		return false;
 	}
 
-	private AuditTrailWatcherEvent__e preparePlatformEvent(AuditTrailWatcherRule__c rule, List<SetupAuditTrail> auditRecords) {
-		// Build detailed message
-		String detail = '';
-		for(SetupAuditTrail audit : auditRecords) {
-			detail += 'Created By: ' + audit.CreatedBy.Username + ' (' + audit.CreatedById + ')\n';
-			detail += 'Display: ' + audit.Display + '\n';
-			detail += 'Section: ' + audit.Section + '\n';
-			if(audit.DelegateUser != null) {
-				detail += 'Delegate User: ' + audit.DelegateUser + '\n';
+	@TestVisible
+	private static Boolean evaluateCustomLogic(String formula, Map<Decimal, Boolean> conditionResults) {
+		if (String.isBlank(formula)) {
+			return false;
+		}
+		String normalized = formula.toUpperCase().replaceAll('\\s+', ' ').trim();
+		ParseResult pr = parseOr(normalized, 0, conditionResults);
+		return pr.success && pr.pos >= normalized.length() ? pr.value : false;
+	}
+
+	private class ParseResult {
+		Boolean value;
+		Integer pos;
+		Boolean success;
+
+		ParseResult(Boolean value, Integer pos, Boolean success) {
+			this.value = value;
+			this.pos = pos;
+			this.success = success;
+		}
+	}
+
+	private static Integer skipSpaces(String expr, Integer pos) {
+		while (pos < expr.length() && expr.substring(pos, pos + 1) == ' ') {
+			pos++;
+		}
+		return pos;
+	}
+
+	private static ParseResult parseOr(String expr, Integer pos, Map<Decimal, Boolean> results) {
+		ParseResult left = parseAnd(expr, pos, results);
+		if (!left.success) {
+			return left;
+		}
+		pos = left.pos;
+		while (pos < expr.length()) {
+			pos = skipSpaces(expr, pos);
+			if (pos + 2 <= expr.length() && expr.substring(pos, pos + 2) == 'OR') {
+				pos = skipSpaces(expr, pos + 2);
+				ParseResult right = parseAnd(expr, pos, results);
+				if (!right.success) {
+					return right;
+				}
+				left = new ParseResult(left.value || right.value, right.pos, true);
+				pos = right.pos;
+			} else {
+				break;
 			}
 		}
-		SetupAuditTrail mainAuditRecord = auditRecords[0];
-		//TODO check for platform event size to prevent error with 1mb limit
-		return new AuditTrailWatcherEvent__e(
-			Action__c = rule.Action__c,
-			Detail__c = detail,
-			Section__c = mainAuditRecord.Section,
-			CreatedById__c = mainAuditRecord.CreatedById,
-			DelegateUser__c = mainAuditRecord.DelegateUser,
-			Severity__c = rule.Severity__c
-		);
+		return left;
 	}
 
-	private Boolean evaluateRuleCondition(String operator, String value, String fieldValue) {
-		if(fieldValue == null) fieldValue = '';
-		if(value == null) value = '';
+	private static ParseResult parseAnd(String expr, Integer pos, Map<Decimal, Boolean> results) {
+		ParseResult left = parsePrimary(expr, pos, results);
+		if (!left.success) {
+			return left;
+		}
+		pos = left.pos;
+		while (pos < expr.length()) {
+			pos = skipSpaces(expr, pos);
+			if (pos + 3 <= expr.length() && expr.substring(pos, pos + 3) == 'AND') {
+				pos = skipSpaces(expr, pos + 3);
+				ParseResult right = parsePrimary(expr, pos, results);
+				if (!right.success) {
+					return right;
+				}
+				left = new ParseResult(left.value && right.value, right.pos, true);
+				pos = right.pos;
+			} else {
+				break;
+			}
+		}
+		return left;
+	}
+
+	private static ParseResult parsePrimary(String expr, Integer pos, Map<Decimal, Boolean> results) {
+		pos = skipSpaces(expr, pos);
+		if (pos >= expr.length()) {
+			return new ParseResult(false, pos, false);
+		}
+		if (expr.substring(pos, pos + 1) == '(') {
+			ParseResult innerResult = parseOr(expr, pos + 1, results);
+			if (!innerResult.success) {
+				return innerResult;
+			}
+			pos = skipSpaces(expr, innerResult.pos);
+			if (pos < expr.length() && expr.substring(pos, pos + 1) == ')') {
+				return new ParseResult(innerResult.value, pos + 1, true);
+			}
+			return new ParseResult(false, pos, false);
+		}
+		Integer start = pos;
+		while (pos < expr.length()) {
+			String c = expr.substring(pos, pos + 1);
+			if (c >= '0' && c <= '9') {
+				pos++;
+			} else {
+				break;
+			}
+		}
+		if (pos > start) {
+			Decimal num = Decimal.valueOf(expr.substring(start, pos));
+			Boolean val = results.get(num);
+			return new ParseResult(val != null && val, pos, true);
+		}
+		return new ParseResult(false, pos, false);
+	}
+
+	private Boolean evaluateCondition(String operator, String value, String fieldValue) {
+		if (fieldValue == null) {
+			fieldValue = '';
+		}
+		if (value == null) {
+			value = '';
+		}
 		switch on operator {
 			when 'Equals' {
 				return fieldValue == value;
@@ -297,5 +388,99 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 				return true;
 			}
 		}
+	}
+
+	private List<Messaging.SingleEmailMessage> prepareEmail(AuditTrailWatcherRule__c rule, List<SetupAuditTrail> auditRecords) {
+		Set<Id> recipientIds = new Set<Id>();
+
+		if (rule.NotificationRecipient__c != null) {
+			recipientIds.add(rule.NotificationRecipient__c);
+		}
+
+		if (String.isNotBlank(rule.GroupName__c)) {
+			Set<String> groupNames = new Set<String>(rule.GroupName__c.split(','));
+			for (String groupName : groupNames) {
+				List<Id> userIds = groupNameToUserIds.get(groupName.trim());
+				if (userIds != null) {
+					recipientIds.addAll(userIds);
+				}
+			}
+		}
+
+		String tableContent = '<table style="min-width:700px;"><thead><tr>';
+		tableContent += '<th>Action</th><th>Display</th><th>Section</th><th>Created Date</th><th>Created By</th><th>Delegate User</th>';
+		tableContent += '</tr></thead><tbody>';
+
+		for (SetupAuditTrail audit : auditRecords) {
+			tableContent += '<tr>';
+			tableContent += '<td><a href=' + orgDomainUrl + rule.Id + ' style="color:#0070d2;text-decoration:underline;">' + audit.Action + '</a></td>';
+			tableContent += '<td>' + audit.Display + '</td>';
+			tableContent += '<td>' + audit.Section + '</td>';
+			tableContent += '<td>' + audit.CreatedDate.format() + '</td>';
+			tableContent += '<td>' + audit.CreatedBy.Username + '</td>';
+			tableContent += '<td>' + (audit.DelegateUser != null ? audit.DelegateUser : '') + '</td>';
+			tableContent += '</tr>';
+		}
+		tableContent += '</tbody></table>';
+
+		List<Messaging.SingleEmailMessage> emails = new List<Messaging.SingleEmailMessage>();
+		for (Id recipientId : recipientIds) {
+			Messaging.SingleEmailMessage mail = Messaging.renderStoredEmailTemplate(
+				emailTemplate.Id,
+				recipientId,
+				rule.Id
+			);
+			mail.setHtmlBody(mail.getHtmlBody().replace('{TableContent}', tableContent));
+			mail.setSaveAsActivity(false);
+			mail.setOrgWideEmailAddressId('0D2J7000000wk58KAA');//TODO use setting or whatever to customize this
+			emails.add(mail);
+		}
+
+		return emails;
+	}
+
+	private Event createActivityEvent(AuditTrailWatcherRule__c rule, List<SetupAuditTrail> auditRecords) {
+		DateTime now = DateTime.now();
+		String subject = 'Audit Trail Alert: ' + rule.Name + ' (' + auditRecords.size() + ' record' + (auditRecords.size() == 1 ? '' : 's') + ')';
+		String description = '';
+		for (SetupAuditTrail audit : auditRecords) {
+			description += 'Action: ' + audit.Action + '\n';
+			description += 'Display: ' + audit.Display + '\n';
+			description += 'Section: ' + audit.Section + '\n';
+			description += 'Created By: ' + audit.CreatedBy.Username + '\n';
+			if (audit.DelegateUser != null) {
+				description += 'Delegate User: ' + audit.DelegateUser + '\n';
+			}
+			description += 'Created Date: ' + audit.CreatedDate.format() + '\n\n';
+		}
+		return new Event(
+			Subject = subject,
+			WhatId = rule.Id,
+			OwnerId = rule.OwnerId,
+			StartDateTime = now,
+			EndDateTime = now.addMinutes(1),
+			Description = description
+		);
+	}
+
+	private AuditTrailWatcherEvent__e preparePlatformEvent(AuditTrailWatcherRule__c rule, List<SetupAuditTrail> auditRecords) {
+		String detail = '';
+		for (SetupAuditTrail audit : auditRecords) {
+			detail += 'Created By: ' + audit.CreatedBy.Username + ' (' + audit.CreatedById + ')\n';
+			detail += 'Display: ' + audit.Display + '\n';
+			detail += 'Section: ' + audit.Section + '\n';
+			if (audit.DelegateUser != null) {
+				detail += 'Delegate User: ' + audit.DelegateUser + '\n';
+			}
+		}
+		SetupAuditTrail mainAuditRecord = auditRecords[0];
+		return new AuditTrailWatcherEvent__e(
+			Action__c = rule.Action__c != null ? rule.Action__c : mainAuditRecord.Action,
+			Detail__c = detail,
+			Section__c = mainAuditRecord.Section,
+			CreatedById__c = mainAuditRecord.CreatedById,
+			DelegateUser__c = mainAuditRecord.DelegateUser,
+			Severity__c = rule.Severity__c
+		);
 	}
 }

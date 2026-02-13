@@ -112,7 +112,7 @@
 <body style="height: auto; min-height: auto;">
 	<div class="container">
 		<div class="alert alert{{{AuditTrailWatcherRule__c.Severity__c}}}">
-			<h2 class="alert-title">Audit Trail Alert: {{{AuditTrailWatcherRule__c.Action__c}}}</h2>
+			<h2 class="alert-title">Audit Trail Alert: {{{AuditTrailWatcherRule__c.Name}}}</h2>
 
 			<p class="alert-content">The following audit trail records have been detected in your Salesforce
 			 organization ({{{Organization.Name}}}: {{{Organization.Id}}}).

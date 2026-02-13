@@ -4,7 +4,6 @@
     <description>Operator used to evaluate the Display field (Equals, NotEquals, Contains, NotContains, StartsWith, NotStartsWith, EndsWith, NotEndsWith, isEmpty, isNotEmpty).</description>
     <label>Operator</label>
     <required>false</required>
-    <trackHistory>false</trackHistory>
     <trackTrending>false</trackTrending>
     <type>Picklist</type>
     <valueSet>

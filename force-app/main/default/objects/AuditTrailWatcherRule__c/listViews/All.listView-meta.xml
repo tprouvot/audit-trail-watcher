@@ -3,11 +3,12 @@
     <fullName>All</fullName>
     <columns>NAME</columns>
     <columns>Action__c</columns>
+    <columns>IsActive__c</columns>
     <columns>GroupName__c</columns>
     <columns>NotificationRecipient__c</columns>
     <columns>Severity__c</columns>
-    <columns>Operator__c</columns>
-    <columns>Value__c</columns>
+    <columns>LogicType__c</columns>
+    <columns>TrackActivity__c</columns>
     <columns>SendPlatformEvent__c</columns>
     <filterScope>Everything</filterScope>
     <label>All</label>

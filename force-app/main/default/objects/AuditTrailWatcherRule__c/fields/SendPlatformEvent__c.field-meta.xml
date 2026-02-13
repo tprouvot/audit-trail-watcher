@@ -5,7 +5,7 @@
     <description>When true, a platform event will be published when this rule is triggered</description>
     <inlineHelpText>Enable this to publish a platform event when this rule is triggered</inlineHelpText>
     <label>Send Platform Event</label>
-    <trackHistory>false</trackHistory>
+    <trackHistory>true</trackHistory>
     <trackTrending>false</trackTrending>
     <type>Checkbox</type>
 </CustomField>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Action__c</fullName>
-    <description>The Setup Audit Trail action to monitor (e.g., changedApexClass, suOrgAdminLogin, etc.).</description>
+    <description>The Setup Audit Trail action to monitor (e.g., changedApexClass, suOrgAdminLogin, PermSetAssign, etc.). When no conditions are set, the rule triggers on any audit record with this action.</description>
     <externalId>false</externalId>
     <label>Action</label>
     <length>255</length>

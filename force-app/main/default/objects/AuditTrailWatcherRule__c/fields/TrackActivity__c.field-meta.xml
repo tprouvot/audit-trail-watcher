@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>TrackActivity__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>When true, creates an Event in the Activity section each time an alert email is sent for this rule.</description>
+    <externalId>false</externalId>
+    <label>Track Activity</label>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>

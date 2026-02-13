@@ -4,7 +4,7 @@
     <defaultValue>true</defaultValue>
     <description>Indicates if the rule is active and should be evaluated by the batch process.</description>
     <label>Active</label>
-    <trackHistory>false</trackHistory>
+    <trackHistory>true</trackHistory>
     <trackTrending>false</trackTrending>
     <type>Checkbox</type>
 </CustomField>

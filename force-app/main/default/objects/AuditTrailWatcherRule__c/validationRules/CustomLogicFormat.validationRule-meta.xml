@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>CustomLogicFormat</fullName>
+    <active>true</active>
+    <description>Custom Logic must contain only digits, AND, OR, parentheses, and spaces.</description>
+    <errorConditionFormula>AND(
+    ISPICKVAL(LogicType__c, &quot;Custom&quot;),
+    NOT(ISBLANK(CustomLogic__c)),
+    NOT(REGEX(TRIM(CustomLogic__c), &quot;^[0-9\\sANDOR()]+$&quot;))
+)</errorConditionFormula>
+    <errorDisplayField>CustomLogic__c</errorDisplayField>
+    <errorMessage>Custom Logic may only contain condition numbers (1, 2, 3), AND, OR, parentheses, and spaces. Example: (1 OR 2) AND 3</errorMessage>
+</ValidationRule>

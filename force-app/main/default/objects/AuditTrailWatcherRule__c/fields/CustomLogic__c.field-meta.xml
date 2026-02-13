@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Value__c</fullName>
-    <description>The value to compare against the Display field using the selected operator.</description>
+    <fullName>CustomLogic__c</fullName>
+    <description>Custom formula to combine condition results. Use condition numbers (1, 2, 3) with AND and OR. Example: (1 OR 2) AND 3</description>
     <externalId>false</externalId>
-    <label>Value</label>
+    <label>Custom Logic</label>
     <length>255</length>
     <required>false</required>
-    <trackHistory>false</trackHistory>
+    <trackHistory>true</trackHistory>
     <trackTrending>false</trackTrending>
     <type>Text</type>
     <unique>false</unique>
