@@ -93,6 +93,72 @@ The following rule monitors Apex class changes and notifies the AuditWatcher gro
 - **Batch and scheduling:** `AuditTrailWatcherBatch` processes only new audit records since the last run.
 - **Permission set:** Included for admin access and notifications.
 
+## Security Use Cases
+
+The most important Setup Audit Trail security events that can be monitored by this framework:
+
+### Privileged Access & Impersonation
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **Login-As usage** | `suOrgAdminLogin`, `suOrgAdminLogout`, `suNetworkAdminLogin`, `suNetworkAdminLogout`, `suPRMAdminLogin`, `suPRMAdminLogout`, `suloginaccessused`, `suLogout` | Detects admin impersonation of users; high-risk for insider threats |
+| **Login-As access granted** | `loginasgrantedtosfdc`, `loginasgrantedtopartnerbt`, `loginasrevokedtosfdc`, `loginasrevokedtopartnerbt` | Tracks when orgs grant or revoke Salesforce support login access |
+
+### User Lifecycle & Authentication
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **User activation/deactivation** | `activateduser`, `deactivateduser`, `frozeuser`, `unfrozeuser` | Detects unauthorized changes to user status |
+| **Password changes** | `changedpassword`, `resetpassword` | Detects password resets (including by admins) |
+| **User creation** | `createduser`, `createdpartneruser`, `createdcustomersuccessuser` | Detects new user creation |
+| **2FA / MFA changes** | `insertTwoFactorInfo2`, `deleteTwoFactorInfo2`, `insertTwoFactorWebAuthN`, `deleteTwoFactorWebAuthN`, `insertAuthenticatorPairing`, `deleteAuthenticatorPairing` | Detects changes to MFA that could weaken security |
+| **Lightning Login** | `lightningloginenroll`, `lightninglogincancel` | Detects enrollment or removal of passwordless login |
+
+### Permissions & Access Control
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **Permission set assignment** | `PermSetAssign`, `PermSetUnassign`, `PermSetGroupAssign`, `PermSetGroupUnassign` | Detects privilege escalation or removal |
+| **Profile changes** | `changedprofileforuser`, `changedroleforuser` | Detects changes to user profiles or roles |
+| **Permission set creation/modification** | `PermSetCreate`, `PermSetDelete`, `PermSetEnableUserPerm`, `PermSetDisableUserPerm`, `PermSetFlsChanged`, `PermSetEntityPermChanged` | Detects changes to permission sets that affect access |
+| **Custom permission changes** | `CustomPermissionCreate`, `CustomPermissionDelete`, `CustomPermissionLabelChange` | Detects creation or modification of custom permissions |
+| **Apex/object access in permission sets** | `SetupEntityAccessAudit_PermissionSet_ApexClass_Enabled`, `SetupEntityAccessAudit_PermissionSet_ApexClass_Disabled` | Detects when Apex classes are granted or removed from permission sets |
+
+### Code & Development Changes
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **Apex class changes** | `changedApexClass` | Detects Apex deployments; critical for supply chain and code tampering |
+| **Apex trigger changes** | `changedApexTrigger` | Detects trigger changes that can affect security and data integrity |
+| **Flow changes** | `changedFlow` | Detects Flow changes that can expose data or automate sensitive actions |
+
+### Sensitive User Data Changes
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **Email changes** | `changedemail`, `changedusername` | Detects email/username changes that can be used for account takeover |
+| **Federation ID changes** | `changedfederationid` | Detects SSO/federation changes that can affect authentication |
+| **Session generation** | `sessiongen` | Detects manual session generation (e.g. for integrations or support) |
+
+### Support & Delegated Access
+
+| Use Case | Action(s) | Why It Matters |
+|----------|-----------|----------------|
+| **Support user toggle** | `changedsupportuseroffon`, `changedsupportuseronoff` | Detects enabling/disabling of support user access |
+| **Override grant access** | `overridegrantaccessenabledoff` | Detects changes to "Administrators Can Log in as Any User" |
+
+### Example Rules for the Framework
+
+| Rule Name | Action | Condition (Display) | Severity |
+|-----------|--------|---------------------|----------|
+| Login-As Usage | `suOrgAdminLogin` | (none or Contains "Login-As") | Critical |
+| Permission Set Assignment | `PermSetAssign` | Contains "Permission set" | Warning |
+| Apex Class Changed | `changedApexClass` | (none or custom) | Critical |
+| User Deactivated | `deactivateduser` | (none) | Warning |
+| Password Reset | `resetpassword` | (none) | Critical |
+| 2FA Removed | `deleteTwoFactorInfo2` | (none) | Critical |
+| Profile Changed | `changedprofileforuser` | Contains "System Administrator" | Critical |
+
 ## How to Configure Rules
 
 1. Create a rule on `AuditTrailWatcherRule__c`.
