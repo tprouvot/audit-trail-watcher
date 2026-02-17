@@ -328,4 +328,48 @@ private class AuditTrailWatcherBatchTest {
 		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('1 OR 2', results));
 		System.assertEquals(true, AuditTrailWatcherBatch.evaluateCustomLogic('(1 OR 2) AND 3', results));
 	}
+
+	@isTest
+	static void testCaseInsensitiveConditionMatching() {
+		AuditTrailWatcherRule__c rule = new AuditTrailWatcherRule__c(
+			Name = 'Case Insensitive Rule',
+			Action__c = 'PermSetAssign',
+			LogicType__c = 'AND',
+			NotificationRecipient__c = UserInfo.getUserId(),
+			SendPlatformEvent__c = false,
+			Severity__c = 'Info',
+			IsActive__c = true,
+			TrackActivity__c = true
+		);
+		insert rule;
+
+		insert new AuditTrailWatcherRuleCondition__c(
+			AuditTrailWatcherRule__c = rule.Id,
+			ConditionNumber__c = 1,
+			SourceField__c = 'Display',
+			Operator__c = 'Contains',
+			Value__c = 'PERMISSION SET'
+		);
+
+		String mockJson = buildMockAuditTrailJson('PermSetAssign', 'Permission set assignment', 'PermissionSet');
+		List<SetupAuditTrail> mockRecords = (List<SetupAuditTrail>) JSON.deserialize(mockJson, Type.forName('List<SetupAuditTrail>'));
+
+		AuditTrailWatcherBatch batch = new AuditTrailWatcherBatch(1);
+		batch.auditSelector = new MockAuditTrailSelector(mockRecords);
+
+		Iterable<SetupAuditTrail> iterable = batch.start(null);
+		for (List<SetupAuditTrail> scope : chunk(iterable, 200)) {
+			batch.execute(null, scope);
+		}
+		batch.finish(null);
+
+		List<Event> activityEvents = [SELECT Id FROM Event WHERE WhatId = :rule.Id AND Subject LIKE 'Audit Trail Alert:%'];
+		System.assert(!activityEvents.isEmpty(), 'Case insensitive rule should match "Permission set" with value "PERMISSION SET".');
+	}
+
+	@isTest
+	static void testDefaultConstructorWithNoLastJob() {
+		AuditTrailWatcherBatch batch = new AuditTrailWatcherBatch();
+		System.assertNotEquals(null, batch.lastRunDate, 'lastRunDate should be set from custom metadata default days when no previous job exists.');
+	}
 }

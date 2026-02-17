@@ -1,18 +1,19 @@
 /**
  * Batch and schedulable job that monitors Setup Audit Trail and triggers rules.
+ * Condition value comparisons are case-insensitive.
  * @author tprouvot
  * @license MIT
  * @see https://github.com/tprouvot/audit-trail-watcher
  */
 public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Database.Stateful, Schedulable {
 
+	@TestVisible
 	DateTime lastRunDate;
 	Map<String, List<Id>> groupNameToUserIds;
 	EmailTemplate emailTemplate;
 	Id orgWideEmailAddressId;
 	String orgDomainUrl;
-
-	private static final String ORG_WIDE_EMAIL_DISPLAY_NAME = 'AuditTrailWatcher';
+	AuditTrailWatcherSetting__mdt settings;
 	Map<String, Set<Id>> actionToRuleIds = new Map<String, Set<Id>>();
 	Map<Id, AuditTrailWatcherRule__c> ruleIdToRule = new Map<Id, AuditTrailWatcherRule__c>();
 	Map<Id, List<AuditTrailWatcherRuleCondition__c>> ruleToConditions = new Map<Id, List<AuditTrailWatcherRuleCondition__c>>();
@@ -31,6 +32,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 	}
 
 	public AuditTrailWatcherBatch() {
+		this.settings = AuditTrailWatcherSetting__mdt.getInstance('Default');
 		List<AsyncApexJob> lastJob = [
 			SELECT CompletedDate
 			FROM AsyncApexJob
@@ -40,7 +42,14 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 			LIMIT 1
 		];
 
-		this.lastRunDate = !lastJob.isEmpty() ? lastJob[0].CompletedDate : null;
+		if (!lastJob.isEmpty()) {
+			this.lastRunDate = lastJob[0].CompletedDate;
+		} else {
+			Integer daysToLookBack = settings != null && settings.DefaultDaysToLookBack__c != null
+				? Integer.valueOf(settings.DefaultDaysToLookBack__c)
+				: 14;
+			this.lastRunDate = DateTime.now().addDays(-daysToLookBack);
+		}
 		this.auditSelector = new AuditTrailSelector();
 		initialize();
 	}
@@ -106,15 +115,21 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 
 		orgDomainUrl = URL.getOrgDomainURL().toExternalForm() + '/';
 
+		String emailTemplateName = settings != null && String.isNotBlank(settings.EmailTemplateDeveloperName__c)
+			? settings.EmailTemplateDeveloperName__c
+			: 'AuditTrailWatcherNotification';
 		List<EmailTemplate> templates = [
-			SELECT Id FROM EmailTemplate WHERE DeveloperName = 'AuditTrailWatcherNotification' LIMIT 1
+			SELECT Id FROM EmailTemplate WHERE DeveloperName = :emailTemplateName LIMIT 1
 		];
 		if (!templates.isEmpty()) {
 			emailTemplate = templates[0];
 		}
 
+		String orgWideEmailDisplayName = settings != null && String.isNotBlank(settings.OrgWideEmailDisplayName__c)
+			? settings.OrgWideEmailDisplayName__c
+			: 'AuditTrailWatcher';
 		List<OrgWideEmailAddress> owaList = [
-			SELECT Id FROM OrgWideEmailAddress WHERE DisplayName = :ORG_WIDE_EMAIL_DISPLAY_NAME LIMIT 1
+			SELECT Id FROM OrgWideEmailAddress WHERE DisplayName = :orgWideEmailDisplayName LIMIT 1
 		];
 		if (!owaList.isEmpty()) {
 			orgWideEmailAddressId = owaList[0].Id;
@@ -190,7 +205,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 			AuditTrailWatcherRule__c rule = ruleIdToRule.get(ruleId);
 
 			if (rule != null) {
-				if (String.isNotBlank(rule.GroupName__c) || rule.NotificationRecipient__c != null) {
+				if (emailTemplate != null && (String.isNotBlank(rule.GroupName__c) || rule.NotificationRecipient__c != null)) {
 					emailsToSend.addAll(prepareEmail(rule, ruleToAuditRecords.get(ruleId)));
 				}
 
@@ -362,30 +377,32 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 		if (value == null) {
 			value = '';
 		}
+		String fieldValueLower = fieldValue.toLowerCase();
+		String valueLower = value.toLowerCase();
 		switch on operator {
 			when 'Equals' {
-				return fieldValue == value;
+				return fieldValueLower == valueLower;
 			}
 			when 'NotEquals' {
-				return fieldValue != value;
+				return fieldValueLower != valueLower;
 			}
 			when 'Contains' {
-				return fieldValue.contains(value);
+				return fieldValueLower.contains(valueLower);
 			}
 			when 'NotContains' {
-				return !fieldValue.contains(value);
+				return !fieldValueLower.contains(valueLower);
 			}
 			when 'StartsWith' {
-				return fieldValue.startsWith(value);
+				return fieldValueLower.startsWith(valueLower);
 			}
 			when 'NotStartsWith' {
-				return !fieldValue.startsWith(value);
+				return !fieldValueLower.startsWith(valueLower);
 			}
 			when 'EndsWith' {
-				return fieldValue.endsWith(value);
+				return fieldValueLower.endsWith(valueLower);
 			}
 			when 'NotEndsWith' {
-				return !fieldValue.endsWith(value);
+				return !fieldValueLower.endsWith(valueLower);
 			}
 			when 'isEmpty' {
 				return String.isBlank(fieldValue);
@@ -394,7 +411,7 @@ public class AuditTrailWatcherBatch implements Database.Batchable<SObject>, Data
 				return !String.isBlank(fieldValue);
 			}
 			when else {
-				return true;
+				return false;
 			}
 		}
 	}
